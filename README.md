@@ -4,6 +4,106 @@
 
 A security review was performed across the backend and frontend. The confirmed vulnerabilities were fixed where code changes were possible. Dependency audits now report zero vulnerabilities in both applications.
 
+## Authentication and Authorization
+
+### Google OIDC Authentication
+
+UniShowcase uses Google Identity Services for Google OpenID Connect-style authentication.
+
+1. The frontend loads the Google Identity Services client.
+2. The user signs in with Google.
+3. Google returns an ID token to the frontend.
+4. The frontend sends the ID token to `POST /api/auth/google`.
+5. The backend validates the token with Google and checks the `aud` claim against `GOOGLE_CLIENT_ID`.
+6. The backend creates or loads the user account.
+7. The backend issues an application JWT for subsequent API requests.
+
+Relevant files:
+
+- `frontend/src/pages/LoginPage.jsx`
+- `frontend/src/pages/RegisterPage.jsx`
+- `frontend/src/services/authService.js`
+- `Backend/src/controllers/authController.js`
+- `Backend/src/middlewares/authMiddleware.js`
+
+### Authenticated User Information
+
+After successful login, the backend returns the authenticated user and application JWT. The frontend stores the session in `AuthContext` and uses the returned role to display the correct dashboard.
+
+Supported roles are:
+
+- `Student`
+- `Recruiter`
+- `Admin`
+
+### Application JWT Validation
+
+Protected API requests use:
+
+```http
+Authorization: Bearer <application-jwt>
+```
+
+The backend:
+
+- Verifies the JWT using the environment-provided `JWT_SECRET`.
+- Restricts JWT verification to `HS256`.
+- Loads the user from MongoDB using the verified token ID.
+- Rejects missing, invalid, expired, or deleted-user tokens.
+- Uses the database user role instead of trusting frontend role values.
+
+Socket.io connections also send the JWT during the handshake. The backend derives the socket user ID from the verified token and does not accept a client-supplied user ID.
+
+### Logout
+
+Logout is implemented in `frontend/src/context/AuthContext.jsx`. It disconnects Socket.io, removes the application JWT and stored user data from `localStorage`, and clears the frontend authentication state.
+
+This logs the user out of UniShowcase. It does not sign the user out of Google.
+
+### Backend Authorization
+
+Authorization is enforced on the backend with `protect` and `restrictTo` middleware plus service-level ownership checks. Frontend route protection is only an interface convenience and is not the security boundary.
+
+Examples:
+
+- Only Admins can create and manage invitations.
+- Only Students can create projects.
+- Only the project owner or an Admin can edit a project.
+- Only the project owner or an Admin can delete a project.
+- Only Admins can change project visibility.
+- Private projects can be viewed only by the owner or an Admin.
+- Recruiters can view public projects and follow students.
+
+Relevant files:
+
+- `Backend/src/middlewares/roleMiddleware.js`
+- `Backend/src/routes/authRoutes.js`
+- `Backend/src/routes/projectRoutes.js`
+- `Backend/src/services/projectService.js`
+- `Backend/src/routes/userRoutes.js`
+
+### Authorization Tests
+
+A Recruiter must not be able to publish another user's project:
+
+```bash
+curl -X PATCH http://localhost:5000/api/projects/PROJECT_ID/visibility \
+	-H "Authorization: Bearer RECRUITER_TOKEN" \
+	-H "Content-Type: application/json" \
+	-d '{"isPublic":true}'
+```
+
+Expected result: `403 Forbidden`.
+
+A Recruiter must not be able to retrieve another user's private project:
+
+```bash
+curl http://localhost:5000/api/projects/PRIVATE_PROJECT_ID \
+	-H "Authorization: Bearer RECRUITER_TOKEN"
+```
+
+Expected result: `403 Forbidden`.
+
 ## Findings and Fixes
 
 ### 1. Exposed Secrets
