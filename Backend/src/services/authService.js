@@ -1,59 +1,91 @@
-const User = require('../models/User');
-const { generateInviteToken, verifyInviteToken, generateUserToken } = require('../utils/inviteGenerator');
+const User = require("../models/User");
+const {
+  generateInviteToken,
+  verifyInviteToken,
+  generateUserToken,
+} = require("../utils/inviteGenerator");
 
 class AuthService {
-  async generateInviteLink(role = 'Student', email = '', frontendUrl = 'http://localhost:5173') {
-    const validRoles = ['Student', 'Recruiter', 'Admin'];
+  async generateInviteLink(
+    role = "Student",
+    email = "",
+    frontendUrl = "http://localhost:5173",
+  ) {
+    const validRoles = ["Student", "Recruiter", "Admin"];
+    const normalizedEmail =
+      typeof email === "string" ? email.trim().toLowerCase() : "";
     if (!validRoles.includes(role)) {
-      throw new Error(`Invalid role. Must be one of: ${validRoles.join(', ')}`);
+      throw new Error(`Invalid role. Must be one of: ${validRoles.join(", ")}`);
     }
-    if (!email) {
-      throw new Error('Email is required to send an invitation');
+    if (!normalizedEmail) {
+      throw new Error("Email is required to send an invitation");
     }
-    const token = generateInviteToken(role, email);
+    const token = generateInviteToken(role, normalizedEmail);
     const inviteLink = `${frontendUrl}/register?inviteToken=${token}`;
 
     // Create the Invitation record in the DB
-    const Invitation = require('../models/Invitation');
+    const Invitation = require("../models/Invitation");
     const invitation = await Invitation.create({
-      email,
+      email: normalizedEmail,
       role,
       token,
-      status: 'Pending'
+      status: "Pending",
     });
 
     // Send email using mailer
-    const { sendInvitationEmail } = require('../utils/mailer');
+    const { sendInvitationEmail } = require("../utils/mailer");
     let emailResult = {};
     try {
-      emailResult = await sendInvitationEmail(email, role, inviteLink);
+      emailResult = await sendInvitationEmail(
+        normalizedEmail,
+        role,
+        inviteLink,
+      );
     } catch (err) {
-      console.error('Failed to send nodemailer email, but invitation logged in DB:', err);
+      console.error(
+        "Failed to send nodemailer email, but invitation logged in DB:",
+        err,
+      );
     }
 
-    return { 
-      token, 
-      inviteLink, 
-      role, 
-      email, 
+    return {
+      token,
+      inviteLink,
+      role,
+      email: normalizedEmail,
       invitation,
-      previewUrl: emailResult.previewUrl 
+      previewUrl: emailResult.previewUrl,
     };
   }
 
   validateInvite(token) {
-    if (!token) throw new Error('Invitation token is required');
+    if (!token) throw new Error("Invitation token is required");
     const decoded = verifyInviteToken(token);
-    if (!decoded) throw new Error('Invalid or expired invitation token');
+    if (!decoded) throw new Error("Invalid or expired invitation token");
     return decoded;
   }
 
-  async processUserRegistration({ googleId, name, email, profilePicture, inviteToken, mockRole }) {
-    let user = await User.findOne({ email });
+  async processUserRegistration({
+    googleId,
+    name,
+    email,
+    profilePicture,
+    inviteToken,
+    mockRole,
+  }) {
+    const normalizedEmail =
+      typeof email === "string" ? email.trim().toLowerCase() : "";
+    if (!normalizedEmail) {
+      throw new Error("A verified Google email is required");
+    }
+
+    let user = await User.findOne({ email: normalizedEmail });
     if (user) {
       // If inviteToken is passed but user already exists, they are trying to register with a used account
       if (inviteToken) {
-        throw new Error('This Google account is already registered. Please log in or use a different Google account to register.');
+        throw new Error(
+          "This Google account is already registered. Please log in or use a different Google account to register.",
+        );
       }
       if (mockRole) {
         user.role = mockRole;
@@ -65,33 +97,57 @@ class AuthService {
     }
 
     // New user registration: requires inviteToken validation or mockRole in dev
-    let role = 'Student';
+    let role = "Student";
     if (inviteToken) {
       const decodedInvite = this.validateInvite(inviteToken);
-      role = decodedInvite.role || 'Student';
-      const Invitation = require('../models/Invitation');
-      await Invitation.findOneAndUpdate({ token: inviteToken }, { status: 'Completed' });
+      const inviteEmail =
+        typeof decodedInvite.email === "string"
+          ? decodedInvite.email.trim().toLowerCase()
+          : "";
+      if (inviteEmail !== normalizedEmail) {
+        throw new Error(
+          "Invitation email does not match the authenticated Google account",
+        );
+      }
+
+      const Invitation = require("../models/Invitation");
+      const invitation = await Invitation.findOneAndUpdate(
+        { token: inviteToken, email: normalizedEmail, status: "Pending" },
+        { $set: { status: "Completed" } },
+        { new: true },
+      );
+      if (!invitation) {
+        throw new Error(
+          "Invitation is invalid, expired, or has already been used",
+        );
+      }
+      role = invitation.role;
     } else if (mockRole) {
       role = mockRole;
     } else {
-      throw new Error('Account not found. You must be invited by an Administrator to register.');
+      throw new Error(
+        "Account not found. You must be invited by an Administrator to register.",
+      );
     }
 
     user = await User.create({
       googleId,
       name,
-      email,
+      email: normalizedEmail,
       profilePicture,
       role,
-      isVerified: true
+      isVerified: true,
     });
 
     return { user, authToken: generateUserToken(user) };
   }
 
-  async generateBulkInvites(invitationsList, frontendUrl = 'http://localhost:5173') {
+  async generateBulkInvites(
+    invitationsList,
+    frontendUrl = "http://localhost:5173",
+  ) {
     if (!Array.isArray(invitationsList)) {
-      throw new Error('Invitations list must be an array');
+      throw new Error("Invitations list must be an array");
     }
 
     const results = [];
@@ -101,13 +157,17 @@ class AuthService {
     for (const invite of invitationsList) {
       const { email, role } = invite;
       try {
-        const res = await this.generateInviteLink(role || 'Student', email, frontendUrl);
+        const res = await this.generateInviteLink(
+          role || "Student",
+          email,
+          frontendUrl,
+        );
         results.push({
           email,
           role,
           success: true,
           previewUrl: res.previewUrl,
-          inviteLink: res.inviteLink
+          inviteLink: res.inviteLink,
         });
         successCount++;
       } catch (err) {
@@ -115,7 +175,7 @@ class AuthService {
           email,
           role,
           success: false,
-          error: err.message
+          error: err.message,
         });
         failedCount++;
       }
@@ -124,7 +184,7 @@ class AuthService {
     return {
       successCount,
       failedCount,
-      results
+      results,
     };
   }
 }
