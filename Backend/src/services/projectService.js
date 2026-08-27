@@ -1,6 +1,11 @@
 const Project = require("../models/Project");
 const eventEmitter = require("../events/emitters");
 const { uploadBufferToCloudinary } = require("../utils/cloudinary");
+const {
+  escapeRegex,
+  parsePagination,
+  assertObjectId,
+} = require("../utils/inputValidation");
 
 class ProjectService {
   async createProject(studentId, projectData, files, user) {
@@ -59,6 +64,7 @@ class ProjectService {
     const query = {};
 
     if (studentId) {
+      assertObjectId(studentId, "student");
       query.studentId = studentId;
     }
 
@@ -70,11 +76,15 @@ class ProjectService {
     }
 
     if (search) {
+      if (typeof search !== "string" || search.length > 100) {
+        throw new Error("Search must be a string of 100 characters or fewer");
+      }
+      const safeSearch = escapeRegex(search);
       query.$and = query.$and || [];
       query.$and.push({
         $or: [
-          { title: { $regex: search, $options: "i" } },
-          { description: { $regex: search, $options: "i" } },
+          { title: { $regex: safeSearch, $options: "i" } },
+          { description: { $regex: safeSearch, $options: "i" } },
         ],
       });
     }
@@ -83,8 +93,18 @@ class ProjectService {
       const techArray = Array.isArray(technologies)
         ? technologies
         : technologies.split(",").map((t) => t.trim());
+      if (
+        techArray.some(
+          (technology) =>
+            typeof technology !== "string" || technology.length > 100,
+        )
+      ) {
+        throw new Error(
+          "Technology filters must be strings of 100 characters or fewer",
+        );
+      }
       query.technologiesUsed = {
-        $in: techArray.map((t) => new RegExp(t, "i")),
+        $in: techArray.map((t) => new RegExp(escapeRegex(t), "i")),
       };
     }
 
@@ -97,8 +117,7 @@ class ProjectService {
       query.studentId = { $in: studentIds };
     }
 
-    const pageNum = parseInt(page) || 1;
-    const limitNum = parseInt(limit) || 10;
+    const { page: pageNum, limit: limitNum } = parsePagination(page, limit);
     const skip = (pageNum - 1) * limitNum;
 
     const total = await Project.countDocuments(query);
@@ -145,6 +164,7 @@ class ProjectService {
   }
 
   async getProjectById(projectId, user) {
+    assertObjectId(projectId, "project");
     const project = await Project.findById(projectId).populate(
       "studentId",
       "name email profilePicture",
@@ -160,6 +180,7 @@ class ProjectService {
   }
 
   async updateProject(projectId, updateData, files, user) {
+    assertObjectId(projectId, "project");
     const project = await Project.findById(projectId);
     if (!project) throw new Error("Project not found");
 
@@ -243,8 +264,7 @@ class ProjectService {
 
   async getLikedProjects(user, queryParams) {
     const { page, limit } = queryParams;
-    const pageNum = parseInt(page) || 1;
-    const limitNum = parseInt(limit) || 10;
+    const { page: pageNum, limit: limitNum } = parsePagination(page, limit);
     const skip = (pageNum - 1) * limitNum;
 
     const Like = require("../models/Like");
@@ -294,6 +314,7 @@ class ProjectService {
   }
 
   async deleteProject(projectId, user) {
+    assertObjectId(projectId, "project");
     const project = await Project.findById(projectId);
     if (!project) throw new Error("Project not found");
 
@@ -310,6 +331,7 @@ class ProjectService {
   }
 
   async updateVisibility(projectId, isPublic, user) {
+    assertObjectId(projectId, "project");
     if (user.role !== "Admin")
       throw new Error(
         "Forbidden: Only admins can update public visibility status",

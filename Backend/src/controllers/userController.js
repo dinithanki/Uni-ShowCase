@@ -1,6 +1,11 @@
 const User = require("../models/User");
 const Project = require("../models/Project");
 const { sendError } = require("../utils/errorResponse");
+const {
+  escapeRegex,
+  parsePagination,
+  assertObjectId,
+} = require("../utils/inputValidation");
 
 const getAllUsers = async (req, res) => {
   try {
@@ -8,13 +13,29 @@ const getAllUsers = async (req, res) => {
     const query = {};
 
     if (search) {
+      if (typeof search !== "string" || search.length > 100) {
+        throw new Error("Search must be a string of 100 characters or fewer");
+      }
+      const safeSearch = escapeRegex(search);
       query.$or = [
-        { name: { $regex: search, $options: "i" } },
-        { email: { $regex: search, $options: "i" } },
+        { name: { $regex: safeSearch, $options: "i" } },
+        { email: { $regex: safeSearch, $options: "i" } },
       ];
     }
 
-    if (role) {
+    if (
+      typeof role !== "string" ||
+      !["Student", "Recruiter", "Admin"].includes(role)
+    ) {
+      if (
+        !Array.isArray(
+          ["Student", "Recruiter", "Admin"].filter(
+            (allowedRole) => allowedRole === role,
+          ),
+        )
+      ) {
+        throw new Error("Invalid role filter");
+      }
       query.role = role;
     }
 
@@ -31,8 +52,7 @@ const getAllUsers = async (req, res) => {
       query._id = { $in: studentIds };
     }
 
-    const pageNum = parseInt(page) || 1;
-    const limitNum = parseInt(limit) || 10;
+    const { page: pageNum, limit: limitNum } = parsePagination(page, limit);
     const skip = (pageNum - 1) * limitNum;
 
     const total = await User.countDocuments(query);
@@ -100,6 +120,7 @@ const getAllUsers = async (req, res) => {
 const updateUser = async (req, res) => {
   try {
     const { role, isVerified } = req.body;
+    assertObjectId(req.params.id, "user");
     const user = await User.findById(req.params.id);
     if (!user) {
       return res.status(404).json({ message: "User not found" });
@@ -129,6 +150,7 @@ const updateUser = async (req, res) => {
 
 const deleteUser = async (req, res) => {
   try {
+    assertObjectId(req.params.id, "user");
     const user = await User.findById(req.params.id);
     if (!user) {
       return res.status(404).json({ message: "User not found" });
