@@ -151,12 +151,11 @@ class ProjectService {
     );
     if (!project) throw new Error("Project not found");
 
-    if (user.role === "Student") {
-      const isOwner =
-        project.studentId._id.toString() === (user._id || user.id).toString();
-      if (!project.isPublic && !isOwner)
-        throw new Error("Access denied: Private project");
-    }
+    const isOwner =
+      project.studentId._id.toString() === (user._id || user.id).toString();
+    const isAdmin = user.role === "Admin";
+    if (!project.isPublic && !isOwner && !isAdmin)
+      throw new Error("Access denied: Private project");
     return project;
   }
 
