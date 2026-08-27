@@ -1,5 +1,6 @@
-const User = require('../models/User');
-const Project = require('../models/Project');
+const User = require("../models/User");
+const Project = require("../models/Project");
+const { sendError } = require("../utils/errorResponse");
 
 const getAllUsers = async (req, res) => {
   try {
@@ -8,8 +9,8 @@ const getAllUsers = async (req, res) => {
 
     if (search) {
       query.$or = [
-        { name: { $regex: search, $options: 'i' } },
-        { email: { $regex: search, $options: 'i' } }
+        { name: { $regex: search, $options: "i" } },
+        { email: { $regex: search, $options: "i" } },
       ];
     }
 
@@ -18,15 +19,15 @@ const getAllUsers = async (req, res) => {
     }
 
     if (isVerified !== undefined) {
-      query.isVerified = isVerified === 'true';
+      query.isVerified = isVerified === "true";
     }
 
     // Followed only filter (for Recruiters)
-    if (followedOnly === 'true' && req.user) {
-      const Follower = require('../models/Follower');
+    if (followedOnly === "true" && req.user) {
+      const Follower = require("../models/Follower");
       const recruiterId = req.user._id || req.user.id;
       const follows = await Follower.find({ recruiterId });
-      const studentIds = follows.map(f => f.studentId);
+      const studentIds = follows.map((f) => f.studentId);
       query._id = { $in: studentIds };
     }
 
@@ -41,37 +42,47 @@ const getAllUsers = async (req, res) => {
       .limit(limitNum);
 
     // Populate follows status and tech stack dynamically
-    const Follower = require('../models/Follower');
-    const recruiterId = req.user ? (req.user._id || req.user.id) : null;
-    
+    const Follower = require("../models/Follower");
+    const recruiterId = req.user ? req.user._id || req.user.id : null;
+
     let followIdsSet = new Set();
     if (recruiterId) {
-      const userIds = users.map(u => u._id);
-      const followsList = await Follower.find({ recruiterId, studentId: { $in: userIds } });
-      followIdsSet = new Set(followsList.map(f => f.studentId.toString()));
+      const userIds = users.map((u) => u._id);
+      const followsList = await Follower.find({
+        recruiterId,
+        studentId: { $in: userIds },
+      });
+      followIdsSet = new Set(followsList.map((f) => f.studentId.toString()));
     }
 
     // Load projects to extract tech stacks
-    const usersWithDetails = await Promise.all(users.map(async (u) => {
-      const uObj = u.toJSON();
-      uObj.isFollowing = followIdsSet.has(u._id.toString());
-      
-      // Default bio
-      uObj.bio = uObj.bio || 'Passionate student developer showcasing portfolio projects at UniShowcase.';
-      
-      // Extract unique tech stack from user's projects
-      const studentProjects = await Project.find({ studentId: u._id, isPublic: true });
-      const techsSet = new Set();
-      studentProjects.forEach(p => {
-        if (p.technologiesUsed) {
-          p.technologiesUsed.forEach(tech => {
-            if (tech) techsSet.add(tech);
-          });
-        }
-      });
-      uObj.techStack = Array.from(techsSet);
-      return uObj;
-    }));
+    const usersWithDetails = await Promise.all(
+      users.map(async (u) => {
+        const uObj = u.toJSON();
+        uObj.isFollowing = followIdsSet.has(u._id.toString());
+
+        // Default bio
+        uObj.bio =
+          uObj.bio ||
+          "Passionate student developer showcasing portfolio projects at UniShowcase.";
+
+        // Extract unique tech stack from user's projects
+        const studentProjects = await Project.find({
+          studentId: u._id,
+          isPublic: true,
+        });
+        const techsSet = new Set();
+        studentProjects.forEach((p) => {
+          if (p.technologiesUsed) {
+            p.technologiesUsed.forEach((tech) => {
+              if (tech) techsSet.add(tech);
+            });
+          }
+        });
+        uObj.techStack = Array.from(techsSet);
+        return uObj;
+      }),
+    );
 
     return res.status(200).json({
       count: usersWithDetails.length,
@@ -79,10 +90,10 @@ const getAllUsers = async (req, res) => {
       page: pageNum,
       pages: Math.ceil(total / limitNum),
       limit: limitNum,
-      users: usersWithDetails
+      users: usersWithDetails,
     });
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    return sendError(res, error, 500, "Unable to load users");
   }
 };
 
@@ -91,13 +102,13 @@ const updateUser = async (req, res) => {
     const { role, isVerified } = req.body;
     const user = await User.findById(req.params.id);
     if (!user) {
-      return res.status(404).json({ message: 'User not found' });
+      return res.status(404).json({ message: "User not found" });
     }
 
     if (role) {
-      const validRoles = ['Student', 'Recruiter', 'Admin'];
+      const validRoles = ["Student", "Recruiter", "Admin"];
       if (!validRoles.includes(role)) {
-        return res.status(400).json({ message: 'Invalid role' });
+        return res.status(400).json({ message: "Invalid role" });
       }
       user.role = role;
     }
@@ -108,11 +119,11 @@ const updateUser = async (req, res) => {
 
     await user.save();
     return res.status(200).json({
-      message: 'User updated successfully',
-      user
+      message: "User updated successfully",
+      user,
     });
   } catch (error) {
-    return res.status(400).json({ message: error.message });
+    return sendError(res, error, 400, "Unable to update user");
   }
 };
 
@@ -120,7 +131,7 @@ const deleteUser = async (req, res) => {
   try {
     const user = await User.findById(req.params.id);
     if (!user) {
-      return res.status(404).json({ message: 'User not found' });
+      return res.status(404).json({ message: "User not found" });
     }
 
     // Delete all projects created by this user
@@ -128,16 +139,16 @@ const deleteUser = async (req, res) => {
     await user.deleteOne();
 
     return res.status(200).json({
-      message: 'User and their associated projects deleted successfully',
-      id: req.params.id
+      message: "User and their associated projects deleted successfully",
+      id: req.params.id,
     });
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    return sendError(res, error, 500, "Unable to delete user");
   }
 };
 
 module.exports = {
   getAllUsers,
   updateUser,
-  deleteUser
+  deleteUser,
 };

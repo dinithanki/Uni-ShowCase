@@ -137,7 +137,7 @@ app.use("/api/users", userRoutes);
 // ── Error handler ─────────────────────────────────────────────────────────────
 app.use((err, req, res, next) => {
   console.error("Unhandled Server Error:", err.stack);
-  res.status(500).json({ message: err.message || "Internal Server Error" });
+  res.status(500).json({ message: "Internal server error" });
 });
 
 // ── Start server ──────────────────────────────────────────────────────────────
