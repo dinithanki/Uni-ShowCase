@@ -1,18 +1,18 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import { io } from 'socket.io-client';
+import React, { createContext, useContext, useState, useEffect } from "react";
+import { io } from "socket.io-client";
 
 const AuthContext = createContext(null);
 
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:5000";
 
 export const AuthProvider = ({ children }) => {
-  const [token, setToken] = useState(localStorage.getItem('token'));
+  const [token, setToken] = useState(localStorage.getItem("token"));
   const [user, setUser] = useState(() => {
-    const saved = localStorage.getItem('user');
+    const saved = localStorage.getItem("user");
     try {
       return saved ? JSON.parse(saved) : null;
     } catch (e) {
-      console.error('Failed to parse user session:', e);
+      console.error("Failed to parse user session:", e);
       return null;
     }
   });
@@ -20,17 +20,18 @@ export const AuthProvider = ({ children }) => {
 
   // Connect / disconnect socket when auth state changes
   useEffect(() => {
-    if (token && user) {
-      const s = io(BACKEND_URL, { transports: ['websocket', 'polling'] });
-
-      s.on('connect', () => {
-        const userId = user._id || user.id;
-        s.emit('register', userId);
-        console.log('[Socket] Connected and registered as', userId);
+    if (token) {
+      const s = io(BACKEND_URL, {
+        transports: ["websocket", "polling"],
+        auth: { token },
       });
 
-      s.on('connect_error', (err) => {
-        console.warn('[Socket] Connection error:', err.message);
+      s.on("connect", () => {
+        console.log("[Socket] Connected with authenticated session");
+      });
+
+      s.on("connect_error", (err) => {
+        console.warn("[Socket] Connection error:", err.message);
       });
 
       setSocket(s);
@@ -43,16 +44,16 @@ export const AuthProvider = ({ children }) => {
   }, [token]);
 
   const login = (newToken, newUser) => {
-    localStorage.setItem('token', newToken);
-    localStorage.setItem('user', JSON.stringify(newUser));
+    localStorage.setItem("token", newToken);
+    localStorage.setItem("user", JSON.stringify(newUser));
     setToken(newToken);
     setUser(newUser);
   };
 
   const logout = () => {
     if (socket) socket.disconnect();
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
+    localStorage.removeItem("token");
+    localStorage.removeItem("user");
     setToken(null);
     setUser(null);
     setSocket(null);
@@ -68,7 +69,7 @@ export const AuthProvider = ({ children }) => {
 export const useAuth = () => {
   const context = useContext(AuthContext);
   if (!context) {
-    throw new Error('useAuth must be used within an AuthProvider');
+    throw new Error("useAuth must be used within an AuthProvider");
   }
   return context;
 };

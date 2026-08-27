@@ -1,19 +1,25 @@
-const http = require('http');
-const express = require('express');
-const cors = require('cors');
-const path = require('path');
-require('dotenv').config();
+const http = require("http");
+const express = require("express");
+const cors = require("cors");
+const path = require("path");
+const jwt = require("jsonwebtoken");
+require("dotenv").config();
 
-const connectDB = require('./config/db');
-const initEventListeners = require('./events/listeners');
-const { initSocketManager, registerSocket, removeSocket } = require('./socket/socketManager');
-const { Server } = require('socket.io');
+const connectDB = require("./config/db");
+const initEventListeners = require("./events/listeners");
+const {
+  initSocketManager,
+  registerSocket,
+  removeSocket,
+} = require("./socket/socketManager");
+const { Server } = require("socket.io");
+const User = require("./models/User");
 
-const authRoutes = require('./routes/authRoutes');
-const projectRoutes = require('./routes/projectRoutes');
-const interactionRoutes = require('./routes/interactionRoutes');
-const notificationRoutes = require('./routes/notificationRoutes');
-const userRoutes = require('./routes/userRoutes');
+const authRoutes = require("./routes/authRoutes");
+const projectRoutes = require("./routes/projectRoutes");
+const interactionRoutes = require("./routes/interactionRoutes");
+const notificationRoutes = require("./routes/notificationRoutes");
+const userRoutes = require("./routes/userRoutes");
 
 const app = express();
 const server = http.createServer(app);
@@ -22,34 +28,36 @@ connectDB();
 initEventListeners();
 
 // ── CORS ─────────────────────────────────────────────────────────────────────
-let frontendUrl = process.env.FRONTEND_URL || '';
-if (frontendUrl.endsWith('/')) {
+let frontendUrl = process.env.FRONTEND_URL || "";
+if (frontendUrl.endsWith("/")) {
   frontendUrl = frontendUrl.slice(0, -1);
 }
 
 const allowedOrigins = [
   frontendUrl,
-  'http://localhost:5173',
-  'http://localhost:3000'
+  "http://localhost:5173",
+  "http://localhost:3000",
 ].filter(Boolean);
 
 const isOriginAllowed = (origin) => {
   if (!origin) return true;
   if (allowedOrigins.includes(origin)) return true;
   // Dynamically allow Vercel previews and deployment domains
-  if (origin.endsWith('.vercel.app')) return true;
+  if (origin.endsWith(".vercel.app")) return true;
   return false;
 };
 
-app.use(cors({
-  origin: (origin, callback) => {
-    if (isOriginAllowed(origin)) {
-      return callback(null, true);
-    }
-    callback(new Error(`Not allowed by CORS: ${origin}`));
-  },
-  credentials: true
-}));
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (isOriginAllowed(origin)) {
+        return callback(null, true);
+      }
+      callback(new Error(`Not allowed by CORS: ${origin}`));
+    },
+    credentials: true,
+  }),
+);
 
 // ── Socket.io ────────────────────────────────────────────────────────────────
 const io = new Server(server, {
@@ -58,29 +66,44 @@ const io = new Server(server, {
       if (isOriginAllowed(origin)) {
         return callback(null, true);
       }
-      callback(new Error('Not allowed by CORS for sockets'));
+      callback(new Error("Not allowed by CORS for sockets"));
     },
-    methods: ['GET', 'POST'],
-    credentials: true
-  }
+    methods: ["GET", "POST"],
+    credentials: true,
+  },
 });
 
 initSocketManager(io);
 
-io.on('connection', (socket) => {
-  const socketManager = require('./socket/socketManager');
+io.use(async (socket, next) => {
+  const token = socket.handshake.auth?.token;
+  if (!token) {
+    return next(new Error("Authentication required"));
+  }
 
-  // Client emits 'register' with their userId right after connecting
-  socket.on('register', (userId) => {
-    if (userId) {
-      registerSocket(userId, socket.id);
-      // Store userId on socket for fast disconnect lookup
-      socket.userId = userId.toString();
-      console.log(`[Socket] User ${userId} registered → socket ${socket.id}`);
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET, {
+      algorithms: ["HS256"],
+    });
+    const user = await User.findById(decoded.id).select("_id");
+    if (!user) {
+      return next(new Error("User not found"));
     }
-  });
 
-  socket.on('disconnect', () => {
+    socket.userId = user._id.toString();
+    return next();
+  } catch (error) {
+    return next(new Error("Invalid authentication token"));
+  }
+});
+
+io.on("connection", (socket) => {
+  registerSocket(socket.userId, socket.id);
+  console.log(
+    `[Socket] Authenticated user ${socket.userId} → socket ${socket.id}`,
+  );
+
+  socket.on("disconnect", () => {
     if (socket.userId) {
       removeSocket(socket.userId, socket.id);
     }
@@ -92,33 +115,33 @@ io.on('connection', (socket) => {
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
 
 // ── Routes ───────────────────────────────────────────────────────────────────
-app.get('/', (req, res) => {
+app.get("/", (req, res) => {
   res.json({
-    status: 'online',
-    message: 'Net-Centric Application Backend Services API',
-    timestamp: new Date()
+    status: "online",
+    message: "Net-Centric Application Backend Services API",
+    timestamp: new Date(),
   });
 });
 
-app.use('/api/auth', authRoutes);
-app.use('/api/projects', projectRoutes);
-app.use('/api', interactionRoutes);
-app.use('/api/notifications', notificationRoutes);
-app.use('/api/users', userRoutes);
+app.use("/api/auth", authRoutes);
+app.use("/api/projects", projectRoutes);
+app.use("/api", interactionRoutes);
+app.use("/api/notifications", notificationRoutes);
+app.use("/api/users", userRoutes);
 
 // ── Error handler ─────────────────────────────────────────────────────────────
 app.use((err, req, res, next) => {
-  console.error('Unhandled Server Error:', err.stack);
-  res.status(500).json({ message: err.message || 'Internal Server Error' });
+  console.error("Unhandled Server Error:", err.stack);
+  res.status(500).json({ message: err.message || "Internal Server Error" });
 });
 
 // ── Start server ──────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 5000;
 
-if (process.env.NODE_ENV !== 'test') {
+if (process.env.NODE_ENV !== "test") {
   server.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
   });
