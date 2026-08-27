@@ -1,6 +1,8 @@
 const http = require("http");
 const express = require("express");
 const cors = require("cors");
+const helmet = require("helmet");
+const { rateLimit } = require("express-rate-limit");
 const path = require("path");
 const jwt = require("jsonwebtoken");
 require("dotenv").config();
@@ -23,9 +25,30 @@ const userRoutes = require("./routes/userRoutes");
 
 const app = express();
 const server = http.createServer(app);
+app.set("trust proxy", 1);
 
 connectDB();
 initEventListeners();
+
+app.use(helmet());
+
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 300,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: { message: "Too many requests, please try again later" },
+});
+
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 20,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: {
+    message: "Too many authentication requests, please try again later",
+  },
+});
 
 // ── CORS ─────────────────────────────────────────────────────────────────────
 const normalizeOrigin = (origin) => origin.trim().replace(/\/$/, "");
@@ -116,6 +139,7 @@ io.on("connection", (socket) => {
 // ── Middleware ────────────────────────────────────────────────────────────────
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use("/api", apiLimiter);
 
 app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
 
@@ -128,7 +152,7 @@ app.get("/", (req, res) => {
   });
 });
 
-app.use("/api/auth", authRoutes);
+app.use("/api/auth", authLimiter, authRoutes);
 app.use("/api/projects", projectRoutes);
 app.use("/api", interactionRoutes);
 app.use("/api/notifications", notificationRoutes);
